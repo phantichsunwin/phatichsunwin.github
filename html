@@ -1,0 +1,172 @@
+<?php
+// ==============================
+// CONFIG DATABASE
+// ==============================
+$host = "localhost";
+$user = "root";
+$pass = "";
+$db   = "taixiu_tool";
+
+$conn = new mysqli($host, $user, $pass, $db);
+if ($conn->connect_error) {
+    die("Kết nối thất bại: " . $conn->connect_error);
+}
+session_start();
+
+// ==============================
+// ROUTE: Xác định page
+// ==============================
+$page = $_GET['page'] ?? 'login';
+
+$msg = "";
+
+// ==============================
+// XỬ LÝ ĐĂNG KÝ
+// ==============================
+if ($page == 'register' && $_SERVER["REQUEST_METHOD"] == "POST") {
+    $u = $_POST['username'];
+    $e = $_POST['email'];
+    $p = $_POST['password'];
+    $c = $_POST['confirm'];
+
+    if ($p != $c) {
+        $msg = "Mật khẩu không khớp!";
+    } else {
+        $check = $conn->prepare("SELECT id FROM users WHERE username=? OR email=?");
+        $check->bind_param("ss", $u, $e);
+        $check->execute();
+        $check->store_result();
+        if ($check->num_rows > 0) {
+            $msg = "Tên hoặc email đã tồn tại!";
+        } else {
+            $h = password_hash($p, PASSWORD_DEFAULT);
+            $stmt = $conn->prepare("INSERT INTO users (username,email,password_hash) VALUES (?,?,?)");
+            $stmt->bind_param("sss", $u, $e, $h);
+            $stmt->execute();
+            $msg = "Đăng ký thành công! <a href='?page=login'>Đăng nhập</a>";
+        }
+    }
+}
+
+// ==============================
+// XỬ LÝ ĐĂNG NHẬP
+// ==============================
+if ($page == 'login' && $_SERVER["REQUEST_METHOD"] == "POST") {
+    $u = $_POST['username'];
+    $p = $_POST['password'];
+    $stmt = $conn->prepare("SELECT id,password_hash FROM users WHERE username=?");
+    $stmt->bind_param("s", $u);
+    $stmt->execute();
+    $stmt->store_result();
+    if ($stmt->num_rows > 0) {
+        $stmt->bind_result($id, $h);
+        $stmt->fetch();
+        if (password_verify($p, $h)) {
+            $_SESSION['uid'] = $id;
+            header("Location: ?page=tool");
+            exit();
+        } else $msg = "Sai mật khẩu!";
+    } else $msg = "Không tìm thấy user!";
+}
+
+// ==============================
+// XỬ LÝ ĐĂNG XUẤT
+// ==============================
+if ($page == 'logout') {
+    session_destroy();
+    header("Location: ?page=login");
+    exit();
+}
+// ==============================
+// HTML HEADER
+// ==============================
+?>
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Tool Tài Xỉu OneFile</title>
+    <style>
+        body { font-family: Arial; background: #111; color: #eee; text-align: center; }
+        input { padding: 8px; margin: 5px; }
+        button { padding: 8px 16px; }
+        .box { background: #222; padding: 20px; display: inline-block; margin-top: 50px; border-radius: 8px; }
+        a { color: #0af; }
+    </style>
+</head>
+<body>
+
+<?php
+// ==============================
+// HTML: ĐĂNG KÝ
+// ==============================
+if ($page == 'register') {
+    echo "<div class='box'>
+    <h2>Đăng Ký</h2>
+    <form method='post'>
+        <input name='username' placeholder='Tên đăng nhập' required><br>
+        <input name='email' type='email' placeholder='Email' required><br>
+        <input name='password' type='password' placeholder='Mật khẩu' required><br>
+        <input name='confirm' type='password' placeholder='Xác nhận mật khẩu' required><br>
+        <button>Đăng Ký</button>
+    </form>
+    <p>$msg</p>
+    <p><a href='?page=login'>Đã có tài khoản? Đăng nhập</a></p>
+    </div>";
+}
+
+// ==============================
+// HTML: ĐĂNG NHẬP
+// ==============================
+if ($page == 'login') {
+    echo "<div class='box'>
+    <h2>Đăng Nhập</h2>
+    <form method='post'>
+        <input name='username' placeholder='Tên đăng nhập' required><br>
+        <input name='password' type='password' placeholder='Mật khẩu' required><br>
+        <button>Đăng Nhập</button>
+    </form>
+    <p>$msg</p>
+    <p><a href='?page=register'>Chưa có tài khoản? Đăng ký</a></p>
+    </div>";
+}
+// ==============================
+// HTML: TOOL TÀI XỈU
+// ==============================
+if ($page == 'tool') {
+    if (!isset($_SESSION['uid'])) {
+        header("Location: ?page=login");
+        exit();
+    }
+
+    echo "<div class='box'>
+    <h2>TOOL TÀI XỈU</h2>
+    <p><a href='?page=logout'>Đăng xuất</a></p>
+    <div id='result'>Đang tải...</div>
+    </div>";
+
+    echo "
+    <script>
+    function fetchData() {
+        fetch('https://wanglinapiws.up.railway.app/api/taixiu')
+            .then(res => res.json())
+            .then(data => {
+                let html = `<b>Phiên:</b> ${data.phien} <br>
+                            <b>Kết quả:</b> ${data.ketqua} <br>
+                            <b>Dự đoán:</b> <span style='color:yellow;'>${data.du_doan}</span>`;
+                document.getElementById('result').innerHTML = html;
+            })
+            .catch(err => {
+                document.getElementById('result').innerHTML = 'Lỗi API!';
+            });
+    }
+    fetchData();
+    setInterval(fetchData, 3000);
+    </script>
+    ";
+}
+
+$conn->close();
+?>
+</body>
+</html>
