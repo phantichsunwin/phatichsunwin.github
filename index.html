@@ -1,0 +1,161 @@
+
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Robot HITCLUB Redirect</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+  <script src="firebase.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: black;
+      height: 100%;
+      font-family: 'Courier New', monospace;
+      color: #0ff;
+      overflow: hidden;
+    }
+    #keyBox {
+      position: absolute;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #000;
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 0 15px #0ff;
+      z-index: 9999;
+      text-align: center;
+    }
+    input, button {
+      padding: 10px;
+      border-radius: 10px;
+      border: none;
+      font-size: 16px;
+      margin-top: 10px;
+    }
+    #robotBox {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 9999;
+      display: none;
+      background: rgba(0, 0, 0, 0.85);
+      border-radius: 15px;
+      box-shadow: 0 0 20px #00ffe0, 0 0 10px #0ff inset;
+      padding: 10px 15px;
+    }
+    #robotBox img {
+      height: 60px;
+      margin-bottom: 10px;
+    }
+    .info span {
+      display: block;
+      font-size: 16px;
+      font-weight: bold;
+      text-shadow: 0 0 5px #0ff;
+    }
+  </style>
+</head>
+<body>
+
+<div id="keyBox">
+  <h2>🔑 Nhập key truy cập</h2>
+  <input id="keyInput" placeholder="Nhập key"><br>
+  <button onclick="checkKey()">Xác nhận</button>
+  <p id="keyError" style="color:red; display:none;">❌ Key sai, hết hạn hoặc vượt thiết bị</p>
+</div>
+
+<div id="robotBox">
+  <img src="https://i.imgur.com/zF6B4BZ.png" alt="Robot" />
+  <div class="info">
+    <span id="session">#------- :</span>
+    <span id="result">Dự đoán: --</span>
+    <span id="confidence">Độ Tin Cậy: --%</span>
+  </div>
+</div>
+
+<script>
+  const deviceID = localStorage.getItem("device_id") || "device-" + Math.random().toString(36).substr(2, 9);
+  localStorage.setItem("device_id", deviceID);
+
+  async function checkKey() {
+    const key = document.getElementById("keyInput").value.trim();
+    const ref = db.ref("keys/" + key);
+    const snap = await ref.get();
+    if (!snap.exists()) return showErr();
+
+    const data = snap.val();
+    const now = Date.now();
+    if (now > data.expires_at) return showErr();
+
+    const used = data.used_devices || {};
+    if (!used[deviceID] && Object.keys(used).length >= data.max_devices) return showErr();
+    if (!used[deviceID]) await ref.child("used_devices/" + deviceID).set(true);
+
+    document.getElementById("keyBox").style.display = "none";
+    document.getElementById("robotBox").style.display = "block";
+    startBot();
+  }
+
+  function showErr() {
+    document.getElementById("keyError").style.display = "block";
+  }
+
+  function get_tai_xiu(total) {
+    return total >= 11 ? "Tài" : "Xỉu";
+  }
+
+  function du_doan_sunwin_200k(totals) {
+    if (totals.length < 4) return ["Chờ", "Đợi thêm dữ liệu"];
+    const last_4 = totals.slice(-4);
+    const last_3 = totals.slice(-3);
+    const last_total = totals[totals.length - 1];
+    const last_result = get_tai_xiu(last_total);
+
+    if (last_4[0] == last_4[2] && last_4[0] == last_4[3] && last_4[0] != last_4[1])
+      return ["Tài", `Cầu đặc biệt ${last_4.join("-")}. Bắt Tài.`];
+
+    if (last_3[0] == last_3[2] && last_3[0] != last_3[1])
+      return [last_result == "Tài" ? "Xỉu" : "Tài", `Cầu sandwich ${last_3.join("-")}. Bẻ cầu.`];
+
+    const special = [7,9,10];
+    const count = last_3.filter(x => special.includes(x)).length;
+    if (count >= 2)
+      return [last_result == "Tài" ? "Xỉu" : "Tài", "Cặp đặc biệt xuất hiện, bẻ cầu."];
+
+    const freq = totals.slice(-6).filter(x => x === last_total).length;
+    if (freq >= 3)
+      return [get_tai_xiu(last_total), `Số ${last_total} lặp ${freq} lần.`];
+
+    if (last_3[0] == last_3[2] || last_3[1] == last_3[2])
+      return [last_result == "Tài" ? "Xỉu" : "Tài", "Cầu lặp, bẻ cầu."];
+
+    return [last_result == "Tài" ? "Xỉu" : "Tài", "Không có cầu đặc biệt, bẻ cầu."];
+  }
+
+  async function startBot() {
+    try {
+      const res = await fetch("https://apihitclub.up.railway.app/api/taixiu");
+      const data = await res.json();
+      const totals = data.history.map(item => item.tong);
+      const nextPhien = data.phien + 1;
+      const [prediction, reason] = du_doan_sunwin_200k(totals);
+      const tinCay = (Math.random() * 49.99 + 50).toFixed(2);
+      document.getElementById("session").textContent = "#" + nextPhien + " :";
+      document.getElementById("result").textContent = "Dự đoán: " + prediction;
+      document.getElementById("confidence").textContent = "Độ Tin Cậy: " + tinCay + "%";
+      setTimeout(() => {
+        window.location.href = "https://i.hit.club";
+      }, 3000);
+    } catch (e) {
+      document.getElementById("result").textContent = "Lỗi kết nối";
+      document.getElementById("confidence").textContent = "--%";
+    }
+  }
+</script>
+</body>
+</html>
